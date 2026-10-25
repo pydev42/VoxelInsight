@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Local indexer for VoxelInsight edge mode."""
+"""Enhanced local indexer for VoxelInsight edge mode with better DICOM/NIfTI support."""
 import os
 import json
 import argparse
@@ -8,8 +7,10 @@ from typing import List, Dict, Any
 
 try:
     import pydicom
+    from pydicom.errors import InvalidDicomError
 except Exception:
     pydicom = None
+    InvalidDicomError = Exception
 
 try:
     import nibabel as nib
@@ -22,16 +23,20 @@ except Exception:
     np = None
 
 
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 
 
 def collect_files(data_dir: Path) -> List[Path]:
-    exts = {'.dcm', '.nii', '.nii.gz'}
+    exts = {'.dcm', '.dicom', '.nii', '.nii.gz'}
     files = []
     for root, dirs, filenames in os.walk(data_dir):
+        # Skip hidden dirs
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
         for fn in filenames:
+            if fn.startswith('.'):
+                continue
             lower = fn.lower()
-            if lower.endswith('.nii.gz') or lower.endswith('.dcm') or lower.endswith('.nii'):
+            if lower.endswith('.nii.gz') or lower.endswith('.dcm') or lower.endswith('.dicom') or lower.endswith('.nii'):
                 files.append(Path(root) / fn)
     return files
 
@@ -39,13 +44,15 @@ def collect_files(data_dir: Path) -> List[Path]:
 def index_dicom(path: Path) -> Dict[str, Any]:
     meta = {
         'type': 'dicom',
-        'path': str(path),
+        'path': str(path.resolve()),
         'filename': path.name,
         'series_description': None,
         'study_description': None,
         'modality': None,
         'body_part': None,
         'patient_id': None,
+        'series_instance_uid': None,
+        'study_instance_uid': None,
     }
     if pydicom is None:
         return meta
@@ -58,6 +65,14 @@ def index_dicom(path: Path) -> Dict[str, Any]:
         meta['patient_id'] = getattr(ds, 'PatientID', None)
         meta['series_instance_uid'] = getattr(ds, 'SeriesInstanceUID', None)
         meta['study_instance_uid'] = getattr(ds, 'StudyInstanceUID', None)
+        try:
+            meta['patient_name'] = str(getattr(ds, 'PatientName', '')) or None
+        except Exception:
+            pass
+        try:
+            meta['manufacturer'] = getattr(ds, 'Manufacturer', None)
+        except Exception:
+            pass
     except Exception as e:
         meta['error'] = str(e)
     return meta
@@ -66,7 +81,7 @@ def index_dicom(path: Path) -> Dict[str, Any]:
 def index_nifti(path: Path) -> Dict[str, Any]:
     meta = {
         'type': 'nifti',
-        'path': str(path),
+        'path': str(path.resolve()),
         'filename': path.name,
     }
     if nib is None:
@@ -80,6 +95,10 @@ def index_nifti(path: Path) -> Dict[str, Any]:
             meta['voxel_size'] = [float(x) for x in hdr.get_zooms()]
         except Exception:
             pass
+        try:
+            meta['affine'] = img.affine.tolist()
+        except Exception:
+            pass
     except Exception as e:
         meta['error'] = str(e)
     return meta
@@ -90,12 +109,12 @@ def build_index(data_dir: Path, out_path: Path) -> Dict[str, Any]:
     entries = []
     for f in files:
         lower = f.name.lower()
-        if lower.endswith('.dcm'):
+        if lower.endswith('.dcm') or lower.endswith('.dicom'):
             entries.append(index_dicom(f))
         elif lower.endswith('.nii') or lower.endswith('.nii.gz'):
             entries.append(index_nifti(f))
         else:
-            entries.append({'type': 'unknown', 'path': str(f), 'filename': f.name})
+            entries.append({'type': 'unknown', 'path': str(f.resolve()), 'filename': f.name})
     index_data = {
         'version': INDEX_VERSION,
         'data_dir': str(data_dir.resolve()),
@@ -108,7 +127,7 @@ def build_index(data_dir: Path, out_path: Path) -> Dict[str, Any]:
     return index_data
 
 
-def search_local(query: str, index_path: Path, limit: int = 20) -> List[Dict[str, Any]]:
+def search_local(query: str, index_path: Path, limit: int = 50) -> List[Dict[str, Any]]:
     if not index_path.exists():
         return []
     try:
@@ -116,15 +135,17 @@ def search_local(query: str, index_path: Path, limit: int = 20) -> List[Dict[str
             data = json.load(fh)
     except Exception:
         return []
-    q = query.lower()
+    q = str(query).lower()
     results = []
     for entry in data.get('entries', []):
         score = 0
-        for key in ['filename', 'series_description', 'study_description', 'modality', 'body_part', 'patient_id']:
+        for key in ['filename', 'series_description', 'study_description', 'modality', 'body_part', 'patient_id', 'patient_name', 'manufacturer']:
             val = entry.get(key)
             if val and q in str(val).lower():
-                score += 1
-        if score > 0 or q in str(entry.get('path', '')).lower():
+                score += 2
+        if q in str(entry.get('path', '')).lower():
+            score += 1
+        if score > 0:
             results.append({**entry, '_score': score})
     results.sort(key=lambda x: x.get('_score', 0), reverse=True)
     return results[:limit]
@@ -135,6 +156,7 @@ def main():
     parser.add_argument('--data', default=os.getenv('LOCAL_DATA_DIR', './data'), help='Directory containing DICOM/NIfTI files')
     parser.add_argument('--out', default=os.getenv('LOCAL_INDEX_PATH', './.voxelinsight_local_index'), help='Output index JSON path')
     parser.add_argument('--search', help='Test search after indexing')
+    parser.add_argument('--limit', type=int, default=20)
     args = parser.parse_args()
 
     data_dir = Path(args.data)
@@ -148,7 +170,7 @@ def main():
     print(f'Indexed {idx["count"]} files')
 
     if args.search:
-        res = search_local(args.search, out_path)
+        res = search_local(args.search, out_path, limit=args.limit)
         print(json.dumps(res, indent=2))
 
 

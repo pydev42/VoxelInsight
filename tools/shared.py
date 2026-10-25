@@ -12,12 +12,12 @@ except Exception:
         args_schema: Type[BaseModel]
 
 try:
-    from tools.local_search import search_local_images
+    from tools.local_search import search_local_images, list_local_images, reindex_local
     from core.edge_config import is_edge_mode
-    if is_edge_mode():
-        pass
 except Exception:
     search_local_images = None
+    list_local_images = None
+    reindex_local = None
     def is_edge_mode():
         return False
 
@@ -806,10 +806,13 @@ def _cs() -> ConversationState:
 
 TOOL_REGISTRY: List[BaseTool] = []
 try:
-    if search_local_images is not None and is_edge_mode():
-        TOOL_REGISTRY.append(search_local_images)
+    if is_edge_mode():
+        for tool in [search_local_images, list_local_images, reindex_local]:
+            if tool is not None:
+                TOOL_REGISTRY.append(tool)
 except Exception:
     pass
+
 
 
 class AgentTool(BaseTool):

@@ -98,6 +98,27 @@ def build_supervisor_llm(
             kwargs.update(settings.extra)
         return ChatAnthropic(**kwargs)
 
+    if provider == "ollama":
+        if ChatOpenAI is None:
+            raise RuntimeError(
+                "langchain-openai is required when LLM_PROVIDER=ollama. Install langchain-openai."
+            )
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        api_key = os.getenv("OLLAMA_API_KEY") or "ollama"
+        model = model_override or os.getenv("SUPERVISOR_LLM_MODEL") or os.getenv("OLLAMA_MODEL") or "qwen2.5:7b-instruct"
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "temperature": temperature,
+            "base_url": base_url,
+            "api_key": api_key,
+        }
+        try:
+            # Some local models don't need reasoning_effort
+            kwargs.pop("reasoning_effort", None)
+        except Exception:
+            pass
+        return ChatOpenAI(**kwargs)
+
     if provider == "bedrock":
         if ChatBedrockConverse is None:
             raise RuntimeError(
@@ -124,4 +145,4 @@ def build_supervisor_llm(
             kwargs.update(settings.extra)
         return ChatBedrockConverse(**kwargs)
 
-    raise ValueError(f"Unknown LLM_PROVIDER {provider}. Use 'openai', 'anthropic', or 'bedrock'.")
+    raise ValueError(f"Unknown LLM_PROVIDER {provider}. Use 'openai', 'anthropic', 'bedrock', or 'ollama'.")
