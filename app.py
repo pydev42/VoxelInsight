@@ -8,6 +8,7 @@ import httpx
 
 from core.supervisor_llm import build_supervisor_llm
 from core.storage import get_temp_dir
+from core.edge_config import is_edge_mode, get_local_data_dir, get_local_index_path
 
 import chainlit as cl
 from chainlit.types import ThreadDict
@@ -52,15 +53,21 @@ import tools.image_registration as ir_mod
 import tools.merlin_3d as merlin3d_mod
 from tools.shared import TOOL_REGISTRY
 
-
-@cl.oauth_callback
-def oauth_callback(
-    provider_id: str,
-    token: str,
-    raw_user_data: Dict[str, str],
-    default_user: cl.User,
-) -> Optional[cl.User]:
-    return default_user
+EDGE_MODE = is_edge_mode()
+if not EDGE_MODE:
+    try:
+        @cl.oauth_callback
+        def oauth_callback(
+            provider_id: str,
+            token: str,
+            raw_user_data: Dict[str, str],
+            default_user: cl.User,
+        ) -> Optional[cl.User]:
+            return default_user
+    except Exception:
+        pass
+else:
+    print(f"Running in EDGE mode. Local data dir: {get_local_data_dir()}, index: {get_local_index_path()}")
 
 
 load_dotenv()

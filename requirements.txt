@@ -44,3 +44,7 @@ wsidicom
 dicomweb_client
 prisma>=0.12,<0.13
 merlin-vlm
+
+# Edge/on-device extras
+httpx>=0.27.0
+faiss-cpu>=1.7.4

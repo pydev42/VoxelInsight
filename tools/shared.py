@@ -11,6 +11,16 @@ except Exception:
         description: str
         args_schema: Type[BaseModel]
 
+try:
+    from tools.local_search import search_local_images
+    from core.edge_config import is_edge_mode
+    if is_edge_mode():
+        pass
+except Exception:
+    search_local_images = None
+    def is_edge_mode():
+        return False
+
 from core.state import Task, ConversationState
 from core.agents.artifacts import (
     CanonicalToolResult,
@@ -795,6 +805,12 @@ def _cs() -> ConversationState:
     s = ConversationState(); s.memory = {}; return s
 
 TOOL_REGISTRY: List[BaseTool] = []
+try:
+    if search_local_images is not None and is_edge_mode():
+        TOOL_REGISTRY.append(search_local_images)
+except Exception:
+    pass
+
 
 class AgentTool(BaseTool):
     """Generic wrapper that calls an async runner and normalizes TaskResult."""

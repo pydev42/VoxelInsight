@@ -193,6 +193,18 @@ def choose_llm(
             settings=settings,
         )
 
+    if provider == "ollama":
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        api_key = os.getenv("OLLAMA_API_KEY") or "ollama"
+        model = os.getenv("OLLAMA_MODEL") or os.getenv("SUPERVISOR_LLM_MODEL") or "qwen2.5:7b-instruct"
+        settings = openai_settings or OpenAISettings(model=model, temperature=0.7)
+        try:
+            settings.model = model
+        except Exception:
+            pass
+        client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        return LLMClient(provider="openai", client=client, settings=settings)
+
     if provider == "bedrock":
         if boto3 is None:
             raise RuntimeError(
